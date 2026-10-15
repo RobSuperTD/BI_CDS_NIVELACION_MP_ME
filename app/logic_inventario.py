@@ -91,19 +91,14 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
     traslados). CantidadBloqueado es puramente informativo: no participa
     en inv_total/inv_libre_calidad ni en la cascada o los traslados.
 
-    Se asume que las entregas pendientes de OC llegaran exitosamente: al
-    cascadear de una semana a la siguiente, el inv_total/inv_libre_calidad
-    de la semana N+1 suma la Entrega Pendiente de la semana N (la semana
-    INMEDIATAMENTE ANTERIOR). Esto aplica igual en modo "actual" y en
-    modo "simulado" -- la semana 0 en si no suma nada (no hay semana -1).
-
-    modo="actual": cascada independiente por semana, sin corregir ningun
-    deficit con traslados (pero si suma la entrega pendiente de la semana
-    anterior, como se describe arriba).
-    modo="simulado": ademas de lo anterior, al final de cada semana aplica
-    los traslados que sugeriria calcular_traslados_semana para esa semana
-    (resta al origen, suma al destino, tanto en inv_total como en
-    inv_libre_calidad) antes de pasar a la semana siguiente.
+    modo="actual": cascada pura, inv(N+1) = inv(N) - necesidad(N). No suma
+    entregas pendientes ni aplica traslados.
+    modo="simulado": se asume que las entregas pendientes de OC llegan, asi
+    que inv(N+1) = inv(N) - necesidad(N) + entrega pendiente(N) (la semana
+    0 en si no suma nada, no hay semana -1). Ademas, al final de cada
+    semana aplica los traslados que sugeriria calcular_traslados_semana
+    para esa semana (resta al origen, suma al destino, tanto en inv_total
+    como en inv_libre_calidad) antes de pasar a la semana siguiente.
 
     Estructura del resultado:
         {IdMaterial: {"Material":, "UnidadMedida":,
@@ -147,7 +142,7 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
         for semana in (0, 1):
             for centro in centros:
                 actual = estado_centro[centro][semana]
-                entrega_semana_anterior = entrega_centro[centro][semana]["cantidad"]
+                entrega_semana_anterior = entrega_centro[centro][semana]["cantidad"] if modo == "simulado" else 0
                 estado_centro[centro][semana + 1]["inv_total"] = (
                     actual["inv_total"] - actual["necesidad"] + entrega_semana_anterior
                 )

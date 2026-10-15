@@ -273,5 +273,50 @@ GLOBAL_CSS = f"""
         width: auto !important;
         flex: 0 0 auto !important;
     }}
+
+    /* ---------- Icono de informacion (i) con mensaje al pasar el mouse ---------- */
+    .info-tip {{
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 17px;
+        height: 17px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: {COLOR_AZUL_CORP};
+        color: #FFFFFF;
+        font-size: 11px;
+        font-weight: 700;
+        cursor: help;
+        vertical-align: middle;
+    }}
+    .info-tip .info-tip-text {{
+        visibility: hidden;
+        opacity: 0;
+        position: absolute;
+        top: 24px;
+        right: -8px;
+        width: 340px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #FFFFFF;
+        color: #2C2C2C;
+        border: 1px solid {COLOR_AZUL_CORP};
+        box-shadow: 0 8px 20px rgba(16, 24, 40, 0.18);
+        font-weight: 400;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        text-align: left;
+        z-index: 1000;
+        transition: opacity .15s;
+    }}
+    .info-tip:hover .info-tip-text {{
+        visibility: visible;
+        opacity: 1;
+    }}
+    .info-tip-text b {{
+        color: {COLOR_AZUL_CORP};
+    }}
 </style>
 """

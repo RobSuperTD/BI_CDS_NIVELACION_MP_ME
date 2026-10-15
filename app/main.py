@@ -117,8 +117,22 @@ with col_semana:
     )
 semana = {"Semana actual": 0, "Próxima semana": 1, "Semana actual + 2": 2}[semana_label]
 
+AYUDA_INVENTARIO = (
+    "<b>Actual:</b> muestra el inventario tal como va hoy. Para la semana siguiente "
+    "toma lo que hay en bodega y le resta lo que se va a consumir. No cuenta pedidos "
+    "que estén por llegar ni movimientos entre centros.<br><br>"
+    "<b>Simulado:</b> muestra cómo quedaría el inventario si se hacen los movimientos "
+    "sugeridos. Para la semana siguiente toma lo que hay en bodega, le resta lo que se "
+    "va a consumir, le suma los pedidos que llegan esta semana y aplica los traslados "
+    "recomendados entre centros."
+)
+
 with col_modo:
-    st.markdown("**Inventario**")
+    st.markdown(
+        "<div style='font-weight:600; margin-bottom:0.25rem;'>Inventario"
+        f"<span class='info-tip'>i<span class='info-tip-text'>{AYUDA_INVENTARIO}</span></span></div>",
+        unsafe_allow_html=True,
+    )
     modo_label = st.radio(
         "modo", ["Actual", "Simulado"],
         horizontal=True, label_visibility="collapsed", key="modo",
