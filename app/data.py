@@ -99,18 +99,6 @@ PROD_BASE AS (
           )
       AND "IdAlmacen" IN ('0003','0004','0005','0006','0017','0018','0038','0039')
 ),
-RES_BASE AS (
-    -- Reservado global sin excepcion de almacenes
-    SELECT
-        "IdMaterial"                as IdMaterial,
-        "IdCentroFase2"             as Centro,
-        "CantidadReservado"         as Reservado
-    FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
-    WHERE (
-            ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
-         OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
-          )
-),
 MRP_BASE AS (
     SELECT
         "MRP_IdMaterial"     as IdMaterial,
@@ -179,7 +167,6 @@ MATERIALES_ALL AS (
     SELECT DISTINCT IdMaterial FROM INV_BASE
     UNION SELECT DISTINCT IdMaterial FROM RESERVADO_BASE
     UNION SELECT DISTINCT IdMaterial FROM PROD_BASE
-    UNION SELECT DISTINCT IdMaterial FROM RES_BASE
     UNION SELECT DISTINCT IdMaterial FROM MRP_BASE
     UNION SELECT DISTINCT IdMaterial FROM PO_BASE
 ),
@@ -218,13 +205,6 @@ PROD_AGG AS (
     FROM PROD_BASE
     GROUP BY IdMaterial, Centro
 ),
-RES_AGG AS (
-    SELECT
-        IdMaterial, Centro,
-        SUM(Reservado) as CantidadReservado
-    FROM RES_BASE
-    GROUP BY IdMaterial, Centro
-),
 MRP_AGG AS (
     -- NecesidadSemana0 ya no se calcula aqui: la Necesidad de la semana actual
     -- viene de CantidadReservado (RESERVADO_AGG), no del MRP.
@@ -244,7 +224,6 @@ SELECT
     COALESCE(I.InventarioLibreUtilizacion, 0)                  as InventarioLibreUtilizacion,
     COALESCE(I.InventarioCalidad, 0)                           as InventarioCalidad,
     COALESCE(I.InventarioBloqueado, 0)                         as CantidadBloqueado,
-    COALESCE(RES.CantidadReservado, 0)                         as CantidadReservado,
     COALESCE(P.InventarioProduccion, 0)                        as InventarioProduccion,
     COALESCE(PO.EntregaPendienteS0, 0)                         as "Entrega Pendiente S0",
     PO.FechaEntregaProgramadaS0                                as "Fecha Entrega Programada S0",
@@ -259,7 +238,6 @@ FROM MATERIAL_CENTRO MC
 LEFT JOIN INV_AGG I  ON MC.IdMaterial = I.IdMaterial  AND MC.Centro = I.Centro
 LEFT JOIN RESERVADO_AGG RES ON MC.IdMaterial = RES.IdMaterial AND MC.Centro = RES.Centro
 LEFT JOIN PROD_AGG P ON MC.IdMaterial = P.IdMaterial  AND MC.Centro = P.Centro
-LEFT JOIN RES_AGG RES ON MC.IdMaterial = RES.IdMaterial AND MC.Centro = RES.Centro
 LEFT JOIN MRP_AGG R  ON MC.IdMaterial = R.IdMaterial  AND MC.Centro = R.Centro
 LEFT JOIN PO_AGG PO  ON MC.IdMaterial = PO.IdMaterial AND MC.Centro = PO.Centro
 LEFT JOIN UNIDAD_AGG U ON MC.IdMaterial = U.IdMaterial
@@ -282,5 +260,4 @@ ORDER BY MC.IdMaterial, MC.Centro
 def cargar_inventario_necesidad() -> pd.DataFrame:
     """Columnas tal como las nombra la consulta (alias sin comillas -> MAYUSCULA
     por defecto de Snowflake; alias entre comillas, ej. "CPS1 Inv", conservan su forma)."""
-    # Cache invalidation forced: 2026-10-08
     return _query(QUERY_INVENTARIO_NECESIDAD)
