@@ -51,6 +51,11 @@ QUERY_INVENTARIO_NECESIDAD = """
 -- Semana 0 = semana actual (lunes a domingo), Semana 1 = siguiente semana, Semana 2 = la que sigue.
 -- Entrega Pendiente: ordenes de compra no entregadas totalmente (IndicadorEntregaFinal = FALSE), sumando
 -- todos los almacenes, discriminadas por el centro real (IdCentroFase2) de TDS_VW_CDS_ORDENCOMPRA.
+-- Excluye ordenes cuya RazonSocial sea una de las razones sociales internas del grupo (no son compras
+-- a terceros).
+-- Necesidad Semana 0 (actual) = CantidadReservado de TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL (no el MRP),
+-- SIN filtro de almacen (a diferencia del inventario normal, que si excluye los almacenes de excepcion).
+-- Necesidad Semana 1 y 2 siguen viniendo del MRP (EEO_RequerimientoMaterialMRP).
 
 WITH INV_BASE AS (
     SELECT
@@ -67,6 +72,18 @@ WITH INV_BASE AS (
          OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
           )
       AND ("IdAlmacen" IS NULL OR "IdAlmacen" NOT IN ('0003','0004','0005','0006','0017','0018','0038','0039'))
+),
+RESERVADO_BASE AS (
+    -- CantidadReservado (Necesidad Semana 0) NO se filtra por almacen, a diferencia del inventario normal
+    SELECT
+        "IdMaterial"           as IdMaterial,
+        "IdCentroFase2"        as Centro,
+        "CantidadReservado"    as Reservado
+    FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
+    WHERE (
+            ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
+         OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
+          )
 ),
 PROD_BASE AS (
     -- Inventario en los almacenes de excepcion (0003,0004,0005,0006,0017,0018,0038,0039)
@@ -121,6 +138,13 @@ PO_BASE AS (
     FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_ORDENCOMPRA
     WHERE "IndicadorEntregaFinal" = FALSE
       AND "TipoMaterial" IN ('ZMPR','ZEMP')
+      AND "RazonSocial" NOT IN (
+            'C.I. SUPER S.A.S.',
+            'SUPER DE ALIMENTOS S.A.S',
+            'GOLOSINAS TRULULU S.A.',
+            'GOLOSINAS SUPER DE COSTA RICA',
+            'MUNDO SUPER GUATEMALA SOCIEDAD ANÓN'
+          )
       AND (
             ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
          OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
@@ -153,6 +177,7 @@ UNIDAD_AGG AS (
 ),
 MATERIALES_ALL AS (
     SELECT DISTINCT IdMaterial FROM INV_BASE
+    UNION SELECT DISTINCT IdMaterial FROM RESERVADO_BASE
     UNION SELECT DISTINCT IdMaterial FROM PROD_BASE
     UNION SELECT DISTINCT IdMaterial FROM RES_BASE
     UNION SELECT DISTINCT IdMaterial FROM MRP_BASE
@@ -179,6 +204,13 @@ INV_AGG AS (
     FROM INV_BASE
     GROUP BY IdMaterial, Centro
 ),
+RESERVADO_AGG AS (
+    SELECT
+        IdMaterial, Centro,
+        SUM(Reservado) as CantidadReservado
+    FROM RESERVADO_BASE
+    GROUP BY IdMaterial, Centro
+),
 PROD_AGG AS (
     SELECT
         IdMaterial, Centro,
@@ -194,13 +226,14 @@ RES_AGG AS (
     GROUP BY IdMaterial, Centro
 ),
 MRP_AGG AS (
+    -- NecesidadSemana0 ya no se calcula aqui: la Necesidad de la semana actual
+    -- viene de CantidadReservado (RESERVADO_AGG), no del MRP.
     SELECT
         IdMaterial, Centro,
-        SUM(CASE WHEN Semana = 0 THEN Cantidad ELSE 0 END) as NecesidadSemana0,
         SUM(CASE WHEN Semana = 1 THEN Cantidad ELSE 0 END) as NecesidadSemana1,
         SUM(CASE WHEN Semana = 2 THEN Cantidad ELSE 0 END) as NecesidadSemana2
     FROM MRP_BASE
-    WHERE Semana IN (0, 1, 2)
+    WHERE Semana IN (1, 2)
     GROUP BY IdMaterial, Centro
 )
 SELECT
@@ -219,11 +252,12 @@ SELECT
     PO.FechaEntregaProgramadaS1                                as "Fecha Entrega Programada S1",
     COALESCE(PO.EntregaPendienteS2, 0)                         as "Entrega Pendiente S2",
     PO.FechaEntregaProgramadaS2                                as "Fecha Entrega Programada S2",
-    COALESCE(R.NecesidadSemana0, 0)                            as NecesidadSemana0,
+    COALESCE(RES.CantidadReservado, 0)                         as NecesidadSemana0,
     COALESCE(R.NecesidadSemana1, 0)                            as NecesidadSemana1,
     COALESCE(R.NecesidadSemana2, 0)                            as NecesidadSemana2
 FROM MATERIAL_CENTRO MC
 LEFT JOIN INV_AGG I  ON MC.IdMaterial = I.IdMaterial  AND MC.Centro = I.Centro
+LEFT JOIN RESERVADO_AGG RES ON MC.IdMaterial = RES.IdMaterial AND MC.Centro = RES.Centro
 LEFT JOIN PROD_AGG P ON MC.IdMaterial = P.IdMaterial  AND MC.Centro = P.Centro
 LEFT JOIN RES_AGG RES ON MC.IdMaterial = RES.IdMaterial AND MC.Centro = RES.Centro
 LEFT JOIN MRP_AGG R  ON MC.IdMaterial = R.IdMaterial  AND MC.Centro = R.Centro
@@ -238,7 +272,6 @@ WHERE COALESCE(I.InventarioLibreUtilizacion, 0) != 0
    OR COALESCE(PO.EntregaPendienteS0, 0) != 0
    OR COALESCE(PO.EntregaPendienteS1, 0) != 0
    OR COALESCE(PO.EntregaPendienteS2, 0) != 0
-   OR COALESCE(R.NecesidadSemana0, 0) != 0
    OR COALESCE(R.NecesidadSemana1, 0) != 0
    OR COALESCE(R.NecesidadSemana2, 0) != 0
 ORDER BY MC.IdMaterial, MC.Centro

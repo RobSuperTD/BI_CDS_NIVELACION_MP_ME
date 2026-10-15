@@ -10,6 +10,8 @@ IDMATERIAL) y los alias entre comillas tal cual se escribieron, con
 espacios ("CPS1 Inv", "Entrega Pendiente NS0", ...).
 """
 
+from io import BytesIO
+
 import pandas as pd
 import streamlit as st
 
@@ -89,19 +91,19 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
     traslados). CantidadBloqueado es puramente informativo: no participa
     en inv_total/inv_libre_calidad ni en la cascada o los traslados.
 
-    modo="actual": cascada independiente por semana (igual que hoy en el
-    Cuadro 1), sin corregir ningun deficit ni sumar entregas pendientes.
-    modo="simulado":
-    - Antes de calcular los traslados de la semana 0, suma la Entrega
-      Pendiente S0 de cada centro a su inv_total/inv_libre_calidad (ya que
-      ahora viene discriminada por centro real): esas ordenes llegan esta
-      semana, asi que un centro que las recibe ya cuenta con ese inventario
-      para decidir si necesita o puede dar un traslado. Las semanas 1 y 2
-      no suman entrega pendiente (solo aplica a la semana actual).
-    - Al final de cada semana, aplica los traslados que sugeriria
-      calcular_traslados_semana para esa semana (resta al origen, suma al
-      destino, tanto en inv_total como en inv_libre_calidad) antes de pasar
-      a la semana siguiente.
+    Se asume que las entregas pendientes de OC llegaran exitosamente: al
+    cascadear de una semana a la siguiente, el inv_total/inv_libre_calidad
+    de la semana N+1 suma la Entrega Pendiente de la semana N (la semana
+    INMEDIATAMENTE ANTERIOR). Esto aplica igual en modo "actual" y en
+    modo "simulado" -- la semana 0 en si no suma nada (no hay semana -1).
+
+    modo="actual": cascada independiente por semana, sin corregir ningun
+    deficit con traslados (pero si suma la entrega pendiente de la semana
+    anterior, como se describe arriba).
+    modo="simulado": ademas de lo anterior, al final de cada semana aplica
+    los traslados que sugeriria calcular_traslados_semana para esa semana
+    (resta al origen, suma al destino, tanto en inv_total como en
+    inv_libre_calidad) antes de pasar a la semana siguiente.
 
     Estructura del resultado:
         {IdMaterial: {"Material":, "UnidadMedida":,
@@ -142,18 +144,15 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
                     "fecha": (fila.get(f"Fecha Entrega Programada S{s}")) if fila is not None else None,
                 }
 
-        if modo == "simulado":
-            for centro in centros:
-                cantidad_s0 = entrega_centro[centro][0]["cantidad"]
-                estado_centro[centro][0]["inv_total"] += cantidad_s0
-                estado_centro[centro][0]["inv_libre_calidad"] += cantidad_s0
-
         for semana in (0, 1):
             for centro in centros:
                 actual = estado_centro[centro][semana]
-                estado_centro[centro][semana + 1]["inv_total"] = actual["inv_total"] - actual["necesidad"]
+                entrega_semana_anterior = entrega_centro[centro][semana]["cantidad"]
+                estado_centro[centro][semana + 1]["inv_total"] = (
+                    actual["inv_total"] - actual["necesidad"] + entrega_semana_anterior
+                )
                 estado_centro[centro][semana + 1]["inv_libre_calidad"] = (
-                    actual["inv_libre_calidad"] - actual["necesidad"]
+                    actual["inv_libre_calidad"] - actual["necesidad"] + entrega_semana_anterior
                 )
 
             if modo == "simulado":
@@ -193,7 +192,6 @@ def construir_filas_inventario_necesidad(
     centros = CENTROS_MP if grupo == "MP" else CENTROS_ME
 
     estados = simular_semanas(df_largo, grupo, modo)
-    resaltar_entrega = modo == "simulado" and semana == 0
 
     filas = []
     for id_mat, info in estados.items():
@@ -224,7 +222,6 @@ def construir_filas_inventario_necesidad(
                 "Bloqueado": bloqueado_centro.get(centro, 0),
                 "EntregaPendiente": entrega["cantidad"],
                 "FechaEntrega": entrega["fecha"],
-                "ResaltarEntrega": resaltar_entrega,
             })
 
     filas.sort(key=lambda f: (f["IdMaterial"], centros.index(f["IdCentro"])))
@@ -288,6 +285,12 @@ def construir_filas_combinadas(
     (a menos que haya un filtro de centro_destino/clasificacion activo, en
     cuyo caso esa fila sin coincidencia se oculta).
 
+    Un material que no tiene NINGUN traslado (Nivelacion o Venta Interna)
+    en ninguno de sus centros, para la semana/modo consultados, se excluye
+    por completo de la vista (no solo el centro sin traslado: el material
+    entero, ya que este cuadro es especificamente de nivelaciones/ventas
+    internas).
+
     grupo: "MP", "ME" o "AMBOS" (combina ambos grupos en una sola lista).
     idcentro_filtro: tupla de codigos reales de IdCentro a incluir (None = todos).
     centro_destino_filtro: tupla de IdCentro; filtra las sub-filas de
@@ -334,4 +337,33 @@ def construir_filas_combinadas(
             for match in matches:
                 filas.append({**fila, **match})
 
+    materiales_con_traslado = {f["IdMaterial"] for f in filas if f.get("CentroNivelar") is not None}
+    filas = [f for f in filas if f["IdMaterial"] in materiales_con_traslado]
+
     return filas
+
+
+def exportar_excel(filas: list[dict]) -> bytes:
+    """Arma un .xlsx en memoria con las mismas filas/columnas que muestra
+    render_combinado_table (una fila por sub-fila de traslado, sin fusionar
+    celdas), listo para descargar con st.download_button."""
+    columnas = {
+        "IdMaterial": "ID",
+        "Material": "Material",
+        "IdCentro": "IdCentro",
+        "UnidadMedida": "UM",
+        "Inventario": "Inventario",
+        "Necesidad": "Necesidad",
+        "EntregaPendiente": "Entrega Pendiente",
+        "FechaEntrega": "Fecha Entrega",
+        "CentroNivelar": "Centro a Nivelar",
+        "CantidadNivelar": "Cantidad a Nivelar",
+        "ClasificacionNivelar": "Clasificacion",
+        "Bloqueado": "Bloqueado",
+    }
+    df = pd.DataFrame(filas, columns=list(columnas.keys())).rename(columns=columnas)
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Nivelacion y Ventas Internas")
+    return buffer.getvalue()

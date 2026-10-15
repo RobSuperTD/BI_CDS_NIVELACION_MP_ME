@@ -2,8 +2,6 @@
 
 import base64
 import html as html_lib
-import io
-import pandas as pd
 from pathlib import Path
 
 import streamlit as st
@@ -17,6 +15,7 @@ from components import (
 from data import cargar_inventario_necesidad
 from logic_inventario import (
     construir_filas_combinadas,
+    exportar_excel,
     CENTROS_MP,
     CENTROS_ME,
 )
@@ -126,10 +125,15 @@ with col_modo:
     )
 modo = "actual" if modo_label == "Actual" else "simulado"
 
-busqueda = st.text_input("🔍 Buscar Material (ID o Nombre)", key="busqueda")
-
 # --- Filtros de nivelacion/venta interna ---
-col_clasif, col_destino = st.columns(2)
+col_busqueda, col_clasif, col_destino = st.columns(3)
+with col_busqueda:
+    st.markdown("**🔍 Buscar Material**")
+    materiales_busqueda = st.multiselect(
+        "busqueda", options=[], default=[], accept_new_options=True,
+        placeholder="ID o nombre, Enter para agregar",
+        label_visibility="collapsed", key="busqueda_ms",
+    )
 with col_clasif:
     st.markdown("**Clasificación**")
     clasificacion_label = st.radio(
@@ -167,11 +171,14 @@ filas_combinadas = construir_filas_combinadas(
     centro_destino_filtro=centro_destino_filtro, clasificacion_filtro=clasificacion_filtro,
 )
 
-if busqueda:
-    termino = busqueda.lower()
+if materiales_busqueda:
+    terminos = [t.strip().lower() for t in materiales_busqueda if t.strip()]
     filas_combinadas = [
         f for f in filas_combinadas
-        if termino in str(f.get("IdMaterial", "")).lower() or termino in str(f.get("Material", "")).lower()
+        if any(
+            termino in str(f.get("IdMaterial", "")).lower() or termino in str(f.get("Material", "")).lower()
+            for termino in terminos
+        )
     ]
 
 total_nivelacion = sum(1 for f in filas_combinadas if f.get("ClasificacionNivelar") == "Nivelacion")
@@ -189,17 +196,10 @@ st.markdown(
 if not filas_combinadas:
     st.info("No hay datos para los filtros seleccionados.")
 else:
-    df_descarga = pd.DataFrame(filas_combinadas)
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_descarga.to_excel(writer, index=False, sheet_name='Datos')
-    
     st.download_button(
-        label="📥 Descargar Excel",
-        data=buffer.getvalue(),
-        file_name="datos_nivelacion.xlsx",
+        "📥 Generar Excel",
+        data=exportar_excel(filas_combinadas),
+        file_name="nivelacion_ventas_internas.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="secondary",
     )
-    
     st.markdown(render_card(render_combinado_table(filas_combinadas)), unsafe_allow_html=True)
