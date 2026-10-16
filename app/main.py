@@ -2,7 +2,11 @@
 
 import base64
 import html as html_lib
+import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
 
@@ -36,17 +40,11 @@ sello_fecha = (
 )
 
 # Cargar el logo
-logo_path = Path("app/static/logo_super.png")
+logo_path = Path(__file__).resolve().parent / "static" / "logo_super.png"
 logo_b64 = ""
 if logo_path.exists():
     with open(logo_path, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode()
-else:
-    # Fallback si se ejecuta desde dentro de app/
-    logo_path_fallback = Path("static/logo_super.png")
-    if logo_path_fallback.exists():
-        with open(logo_path_fallback, "rb") as f:
-            logo_b64 = base64.b64encode(f.read()).decode()
 
 # Renderizar el encabezado completo (Hero)
 st.markdown(

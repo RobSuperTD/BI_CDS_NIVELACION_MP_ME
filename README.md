@@ -1,55 +1,137 @@
-# Tablero de Nivelación y Ventas Internas (MP y ME)
+# 📦 Tablero de Nivelación y Ventas Internas (MP y ME)
 
-Este proyecto es una aplicación web interactiva desarrollada en **Streamlit**. Su propósito principal es presentar el balance de inventario de **Materias Primas (MP)** y **Material de Empaque (ME)** contrastado contra las políticas de necesidad MRP y entregas pendientes de órdenes de compra, facilitando la toma de decisiones sobre nivelaciones y ventas internas entre los diferentes centros físicos y razones sociales (Super, Trululu, Bianchi, Oka Loka, etc.).
+Aplicación web interactiva desarrollada en **Streamlit** para la gestión, simulación y optimización del balance de inventario de **Materias Primas (MP)** y **Material de Empaque (ME)** entre los diferentes centros productivos y razones sociales del grupo.
+
+El tablero cruza en tiempo real el inventario disponible en piso y almacenes contra las reservas actuales, los requerimientos del **MRP** y las **Entregas Pendientes de Órdenes de Compra (OC)** en **Snowflake**, sugiriendo automáticamente los traslados óptimos entre centros y clasificándolos en **Nivelaciones** o **Ventas Internas**.
+
+---
 
 ## 🚀 Características Principales
 
-- **Conexión Directa a Snowflake:** Extrae en tiempo real el consolidado de inventarios, necesidades MRP y entregas de OC mediante autenticación segura con llave privada (`.p8`).
-- **Pestaña 1 - Inventario y Necesidad:** Visualización consolidada por lugar físico o razón social, con filtros dinámicos de semana (actual, próxima, actual+2), grupo de materiales, y modo (actual vs. simulado).
-- **Pestaña 2 - Nivelaciones y Ventas Internas:** Motor de cálculo que sugiere traslados entre centros para optimizar el inventario (superávit vs. déficit), clasificando automáticamente entre "Nivelación" y "Venta Interna".
-- **Buscador Integrado:** Funcionalidad de búsqueda en tiempo real para filtrar materiales por ID o Nombre en ambos cuadros.
-- **Rendimiento Optimizado:** Uso intensivo de caché (`@st.cache_data`) en la lógica de negocio para una experiencia de usuario rápida y fluida sin reprocesamientos innecesarios de datos pesados.
-- **UI/UX Corporativo:** Diseño de cabecera "Hero Header", componentes modulares, alineación optimizada de datos numéricos y manejo elegante de estados vacíos.
+- **Vista Unificada de Balance y Traslados:** Integra en una sola tabla jerárquica el estado de cada centro (`Inventario`, `Necesidad`, `Entrega Pendiente`, `Fecha Entrega`, `Bloqueado`) junto con el plan de despacho sugerido (`Centro a Nivelar`, `Cantidad a Nivelar`, `Clasificación`) y una fila de **Subtotal** consolidado por material.
+- **Enfoque Accionable:** Filtra y muestra exclusivamente aquellos materiales que presentan al menos una oportunidad de traslado (Nivelación o Venta Interna) en la semana y modo seleccionados.
+- **Motor de Simulación Semanal (Actual vs. Simulado):**
+  - **Modo Actual:** Proyecta el inventario de las próximas semanas descontando únicamente el consumo ($\text{Inventario} - \text{Necesidad}$), sin considerar recepciones de OC ni traslados entre centros.
+  - **Modo Simulado:** Proyecta cómo evolucionaría el inventario si se reciben a tiempo las entregas pendientes de OC de la semana previa y se ejecutan los traslados recomendados semana a semana. Incluye un tooltip informativo `(i)` en la interfaz.
+- **Filtros Avanzados y Búsqueda Múltiple:**
+  - Filtro de **Grupo** (*Materia Prima*, *Material de Empaque* o *Ambos*).
+  - Selección múltiple de **IdCentro** (origen/visualización) y **Centro Destino** con sincronización automática de la opción `"Todos"`.
+  - **Buscador por Pastillas (Tags):** Permite ingresar y combinar múltiples códigos `ID` o nombres de materiales simultáneamente.
+  - Filtro por **Clasificación** (*Todas*, *Nivelación*, *Venta Interna*) y horizonte de **Semana** (*Semana actual*, *Próxima semana*, *Semana actual + 2*).
+- **Exportación a Excel (`.xlsx`):** Descarga inmediata en memoria (`openpyxl`) de la vista filtrada lista para gestión operativa.
+- **Alto Rendimiento:** Consultas y simulaciones optimizadas con `@st.cache_data` y renderizado HTML vectorizado mediante listas (sin uso de `iterrows` en el dibujado).
+
+---
+
+## 🧠 Reglas de Negocio y Lógica de Cálculo
+
+### 1. Centros y Grupos de Materiales
+| Grupo | Prefijo Material | Centros Habilitados (`IdCentroFase2`) |
+| :--- | :---: | :--- |
+| **Materia Prima (MP)** | `13%` | `CPS1`, `CPS2`, `CPT2`, `CPB2`, `CPB1` |
+| **Material de Empaque (ME)** | `14%` | `CPS9`, `CPT9`, `CPB9`, `CPE9`, `CPK9`, `CPO9` |
+
+### 2. Composición del Inventario (Semana 0)
+A partir de la vista `TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL`:
+- **Inventario Libre + Calidad (`inv_libre_calidad`):** Suma de `CantidadLibreUtilizacion + CantidadControlCalidad` excluyendo los almacenes de excepción (`0003`, `0004`, `0005`, `0006`, `0017`, `0018`, `0038`, `0039`). **Es el único inventario elegible para ser trasladado a otros centros.**
+- **Inventario de Producción (`InventarioProduccion`):** Equivale al **85%** de `(Libre + Calidad)` ubicado en los almacenes de excepción mencionados. Sirve para cubrir la necesidad del propio centro, pero **nunca se despacha en traslados**.
+- **Inventario Total (`inv_total`):** `inv_libre_calidad + InventarioProduccion`.
+- **Inventario Bloqueado (`CantidadBloqueado`):** Se muestra como alerta visual (píldora amarilla) al final de la fila; no participa en el cálculo de disponibilidad ni en la cascada semanal.
+
+### 3. Necesidades por Horizonte Semanal
+- **Semana 0 (Semana Actual):** Corresponde a la columna `CantidadReservado` de la vista de inventario actual, calculada de forma global por centro (**sin** excluir almacenes).
+- **Semana 1 (Próxima) y Semana 2 (Actual + 2):** Provienen de los requerimientos activos (`MRP_Estado = 'Activo'`) en `EEO_RequerimientoMaterialMRP` para materiales `ZMPR` y `ZEMP`.
+
+### 4. Entregas Pendientes de Órdenes de Compra (OC)
+Extraídas de `TDS_VW_CDS_ORDENCOMPRA` bajo las siguientes condiciones:
+- Cantidad pendiente: `CantidadOrdenCompra - CantidadEntregada`.
+- Solo posiciones con entrega abierta (`IndicadorEntregaFinal = FALSE`) y tipos `ZMPR` / `ZEMP`.
+- **Exclusión de compras intercompañía:** Se descartan las órdenes cuya `RazonSocial` pertenece a empresas internas del grupo:
+  - `C.I. SUPER S.A.S.`
+  - `SUPER DE ALIMENTOS S.A.S`
+  - `GOLOSINAS TRULULU S.A.`
+  - `GOLOSINAS SUPER DE COSTA RICA`
+  - `MUNDO SUPER GUATEMALA SOCIEDAD ANÓN`
+- Se agrupan por semana (`0`, `1`, `2`) según `FechaEntregaPosicion` y se registra la fecha mínima programada (`DD/MM`).
+
+### 5. Algoritmo de Asignación de Traslados (`calcular_traslados_semana`)
+Para cada material y semana:
+1. Se calcula el balance neto de cada centro:
+   $$\text{Superávit}(c) = \text{InvTotal}(c) - \text{Necesidad}(c)$$
+2. **Centros Origen ($\text{Superávit} > 0$):**
+   - Lo máximo que pueden enviar sin quedar en déficit y sin tocar piso de producción es:
+     $$\text{Capacidad}(c) = \min\big(\text{Superávit}(c),\ \text{InvLibreCalidad}(c)\big)$$
+   - Se priorizan de **mayor a menor superávit**.
+3. **Centros Destino ($\text{Superávit} < 0$):**
+   - Se priorizan de **menor a mayor déficit** con el objetivo de cubrir por completo la mayor cantidad de plantas posible.
+4. **Clasificación del Movimiento:**
+   - 🟢 **Nivelación:** Origen y Destino comparten el **mismo último dígito** en su código de centro (misma razón social, ej. `CPS1` → `CPB1` o `CPS9` → `CPT9`).
+   - 🔵 **Venta Interna:** Origen y Destino tienen **diferente último dígito** (distinta razón social, ej. `CPS1` → `CPS2`).
+
+---
 
 ## 📁 Estructura del Proyecto
 
 ```text
 /
 ├── app/
-│   ├── main.py               # Punto de entrada de la aplicación Streamlit
-│   ├── data.py               # Capa de datos y conexión a Snowflake
-│   ├── logic_inventario.py   # Lógica de negocio (simulación y cálculos de traslados)
-│   ├── components.py         # Componentes visuales HTML reutilizables (tarjetas, tablas)
-│   ├── styles.py             # Reglas CSS globales y paleta de colores corporativos
-│   └── static/               # Archivos estáticos (ej. logo corporativo)
-├── requirements.txt          # Dependencias de Python
-├── .gitignore                # Archivos ignorados por Git
-└── README.md                 # Documentación del proyecto
+│   ├── main.py               # Punto de entrada Streamlit: layout, filtros, KPIs y descarga Excel
+│   ├── data.py               # Consulta SQL CTE y caché de datos
+│   ├── logic_inventario.py   # Motor de simulación semanal, algoritmo de traslados y exportación .xlsx
+│   ├── components.py         # Generadores de tablas HTML con rowspan, subtotales, tarjetas y badges
+│   ├── styles.py             # Sistema de diseño CSS, paleta corporativa, Hero Header y tooltips
+│   ├── config/
+│   │   └── settings.py       # Lectura de credenciales Snowflake desde .streamlit/secrets.toml
+│   ├── db/
+│   │   └── connector.py      # Conexión singleton a Snowflake (.p8) con reconexión automática
+│   └── static/               # Recursos gráficos (logo_super.png)
+├── .streamlit/
+│   ├── config.toml           # Tema corporativo y configuración del servidor Streamlit
+│   └── secrets.toml.example  # Plantilla de configuración de credenciales Snowflake
+├── Dockerfile                # Imagen de producción (python:3.12-slim)
+├── deploy.conf               # Parámetros del contenedor (APP_NAME, BASE_PATH, HOST_PORT, MEM_LIMIT)
+├── deploy.sh                 # Script estandarizado de despliegue en el servidor BI
+├── requirements.txt          # Dependencias del entorno Python
+├── .dockerignore             # Exclusiones de contexto Docker
+├── .gitignore                # Reglas de exclusión de Git (secrets.toml, llaves .p8, caché)
+└── README.md                 # Documentación general y técnica del proyecto
 ```
 
-## ⚙️ Requisitos y Configuración Local
+---
 
-1. **Clonar el repositorio y ubicarte en la raíz.**
+## ⚙️ Requisitos e Instalación Local
+
+1. **Clonar el repositorio y ubicarse en el directorio raíz:**
+   ```bash
+   git clone https://github.com/juanfernandopatino/BI_CDS_NIVELACION_MP_ME.git
+   cd BI_CDS_NIVELACION_MP_ME
+   ```
+
 2. **Instalar las dependencias:**
    ```bash
    pip install -r requirements.txt
    ```
-3. **Configuración de Variables de Entorno:**
-   El proyecto requiere un archivo `.env` en la raíz (u otra ruta accesible definida globalmente) con las siguientes variables para la conexión a Snowflake:
-   ```env
-   SF_USER=tu_usuario
-   SF_ACCOUNT=tu_cuenta
-   SF_PRIVATE_KEY_PATH=ruta/a/tu/llave_privada.p8
-   SF_ROLE=tu_rol
-   SF_WAREHOUSE=tu_warehouse
+
+3. **Configurar las credenciales de Snowflake (`.streamlit/secrets.toml`):**
+   Copiar `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` y completar las credenciales y la ruta hacia la llave privada `.p8`:
+   ```toml
+   [snowflake]
+   account = "nsauztq-gf69991"
+   user = "USR_TABLEAU"
+   role = "TABLEAU"
+   warehouse = "COMPUTE_WH"
+   priv_key_path = ".streamlit/Privada_USR_TABLEAU.p8"
+   priv_key_passphrase = ""
    ```
+
+---
 
 ## ▶️ Ejecución
 
-Para iniciar el tablero localmente, ejecuta el siguiente comando:
+Para levantar el servidor local de Streamlit:
 
 ```bash
-streamlit run app/main.py
+python -m streamlit run app/main.py
 ```
 
-La aplicación se abrirá automáticamente en tu navegador por defecto (normalmente en `http://localhost:8501`).
+El tablero estará disponible en tu navegador en `http://localhost:8501`.

@@ -1,0 +1,36 @@
+# Control de versiones
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secretos y llaves (se montan en runtime, NO se hornean en la imagen)
+.env
+.env.*
+*.env
+.streamlit/secrets.toml
+*.pem
+*.ppk
+*.key
+*.p8
+*.p12
+*.pfx
+secrets/
+
+# Documentación y metadatos (no se necesitan en la imagen)
+*.md
+.vscode/
+.idea/
+
+# Datos y logs
+*.csv
+*.xlsx
+*.parquet
+data/
+*.log

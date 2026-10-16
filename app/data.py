@@ -1,46 +1,26 @@
-"""Capa de acceso a datos (Snowflake) para el tablero Balance Inventario MP/ME.
+"""Capa de acceso a datos (Snowflake) para el tablero Nivelacion y Ventas Internas MP y ME.
 
-Conexion por llave privada .p8 (SF_PRIVATE_KEY_PATH), igual que el resto de
-tableros del servidor de BI. El .env SIEMPRE se lee de la misma ruta fija
-del usuario (no del cwd del proceso ni de un .env local del proyecto).
+Conexion por llave privada .p8 leida desde .streamlit/secrets.toml ([snowflake])
+mediante app/db/connector.py y app/config/settings.py, igual que el resto de
+tableros del servidor de BI.
 
 Fuentes:
   - Inventario: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
   - Necesidad MRP: DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_RequerimientoMaterialMRP"
-  - Entregas pendientes de OC: DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC.EEO_PROVEEDORPENDIENTE
+  - Entregas pendientes de OC: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_ORDENCOMPRA
   - Maestra de materiales: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_MAESTRAMATERIALES
 """
 
 from __future__ import annotations
 
-import os
-
 import pandas as pd
-import snowflake.connector
 import streamlit as st
-from dotenv import load_dotenv
 
-load_dotenv()
-
-
-def conectar_snowflake():
-    return snowflake.connector.connect(
-        user=os.getenv("SF_USER"),
-        account=os.getenv("SF_ACCOUNT"),
-        private_key_file=os.getenv("SF_PRIVATE_KEY_PATH"),
-        role=os.getenv("SF_ROLE"),
-        warehouse=os.getenv("SF_WAREHOUSE"),
-    )
+from app.db.connector import run_query
 
 
 def _query(sql: str) -> pd.DataFrame:
-    conn = conectar_snowflake()
-    try:
-        cur = conn.cursor()
-        cur.execute(sql)
-        return cur.fetch_pandas_all()
-    finally:
-        conn.close()
+    return run_query(sql)
 
 
 QUERY_INVENTARIO_NECESIDAD = """
