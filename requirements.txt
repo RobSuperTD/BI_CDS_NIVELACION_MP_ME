@@ -1,11 +1,13 @@
-streamlit>=1.32.0
-# Pin obligatorio: starlette>=1.0.0 rompe el GZipMiddleware interno de streamlit
-# (Internal Server Error en produccion aunque el healthcheck responda 200).
+streamlit>=1.32
+# Pin obligatorio: streamlit no fija starlette (dependencia transitiva) mas alla
+# de un rango amplio, y una version recien publicada puede romper el
+# GZipMiddleware interno de streamlit -> "Internal Server Error" en toda peticion
+# real aunque el healthcheck siga en 200.
 starlette==0.46.0
-pandas>=2.1.0
-pyarrow>=14.0.0
-plotly>=5.18.0
-snowflake-connector-python>=3.5.0
-cryptography>=41.0.0
-certifi>=2023.7.22
-openpyxl>=3.1.2
+# El extra [pandas] arrastra pyarrow, que `Session.sql(...).to_pandas()` necesita
+# (el paquete base de snowpark NO lo instala en una imagen limpia).
+snowflake-snowpark-python[pandas]
+pandas
+numpy
+plotly
+openpyxl
