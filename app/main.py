@@ -149,39 +149,16 @@ with col_modo:
 modo = "actual" if modo_label == "Actual" else "simulado"
 
 # --- Filtros de nivelacion/venta interna ---
-prefijo_filtro = ("13",) if grupo == "MP" else (("14",) if grupo == "ME" else ("13", "14"))
-df_grupo_mats = df_consolidado[df_consolidado["IDMATERIAL"].str.startswith(prefijo_filtro)]
-mats_unicos = (
-    df_grupo_mats[["IDMATERIAL", "MATERIAL"]]
-    .dropna(subset=["IDMATERIAL"])
-    .drop_duplicates()
-    .sort_values("IDMATERIAL")
-)
-opciones_materiales = [
-    f"{row['IDMATERIAL']} - {row['MATERIAL']}"
-    for _, row in mats_unicos.iterrows()
-]
-
-if "busqueda_ms" in st.session_state:
-    st.session_state["busqueda_ms"] = [
-        m for m in st.session_state["busqueda_ms"]
-        if any(str(m).startswith(p) for p in prefijo_filtro)
-    ]
-
 col_busqueda, col_clasif, col_destino = st.columns(3)
-with col_busqueda:
-    st.markdown("**🔍 Buscar Material**")
-    materiales_busqueda = st.multiselect(
-        "busqueda", options=opciones_materiales, default=[],
-        placeholder="Código o nombre para autocompletar...",
-        label_visibility="collapsed", key="busqueda_ms",
-    )
+
 with col_clasif:
     st.markdown("**Clasificación**")
     clasificacion_label = st.radio(
         "clasificacion_filtro", ["Todas", "Nivelacion", "Venta Interna"],
         horizontal=True, label_visibility="collapsed", key="clasificacion_filtro",
     )
+clasificacion_filtro = None if clasificacion_label == "Todas" else clasificacion_label
+
 opciones_centro_destino = ["Todos"] + centros_grupo
 
 def _marcar_todos_centro_destino():
@@ -199,23 +176,44 @@ with col_destino:
         on_change=_marcar_todos_centro_destino,
     )
 
-clasificacion_filtro = None if clasificacion_label == "Todas" else clasificacion_label
 if "Todos" in seleccion_centro_destino or not seleccion_centro_destino:
     centro_destino_filtro = None
 else:
     centro_destino_filtro = tuple(seleccion_centro_destino)
 
-filas_combinadas = construir_filas_combinadas(
+# Filas base segun semana, modo, centros y clasificacion
+filas_base = construir_filas_combinadas(
     df_consolidado, grupo=grupo, semana=semana, modo=modo,
     idcentro_filtro=idcentro_filtro,
     centro_destino_filtro=centro_destino_filtro, clasificacion_filtro=clasificacion_filtro,
 )
 
+# Opciones de materiales UNICAMENTE de los materiales que aparecen en el dataframe
+mats_unicos = sorted(
+    list({(f["IdMaterial"], f["Material"]) for f in filas_base}),
+    key=lambda x: x[0],
+)
+opciones_materiales = [f"{m[0]} - {m[1]}" for m in mats_unicos]
+
+if "busqueda_ms" in st.session_state:
+    st.session_state["busqueda_ms"] = [
+        m for m in st.session_state["busqueda_ms"]
+        if m in opciones_materiales
+    ]
+
+with col_busqueda:
+    st.markdown("**🔍 Buscar Material**")
+    materiales_busqueda = st.multiselect(
+        "busqueda", options=opciones_materiales, default=[],
+        placeholder="Código o nombre para autocompletar...",
+        label_visibility="collapsed", key="busqueda_ms",
+    )
+
 if materiales_busqueda:
     terminos_id = {m.split(" - ")[0].strip() for m in materiales_busqueda if " - " in m}
     terminos_texto = [m.lower().strip() for m in materiales_busqueda if " - " not in m]
     filas_combinadas = [
-        f for f in filas_combinadas
+        f for f in filas_base
         if (
             str(f.get("IdMaterial", "")) in terminos_id
             or any(
@@ -224,6 +222,8 @@ if materiales_busqueda:
             )
         )
     ]
+else:
+    filas_combinadas = filas_base
 
 total_nivelacion = sum(1 for f in filas_combinadas if f.get("ClasificacionNivelar") == "Nivelacion")
 total_venta_interna = sum(1 for f in filas_combinadas if f.get("ClasificacionNivelar") == "Venta Interna")
