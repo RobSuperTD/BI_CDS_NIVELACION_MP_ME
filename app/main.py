@@ -85,10 +85,21 @@ grupo = GRUPOS[grupo_label]
 centros_grupo = _centros_de_grupo(grupo)
 opciones_idcentro = ["Todos"] + centros_grupo
 
+def _sincronizar_filtro_todos(key_ms: str):
+    seleccion = st.session_state.get(key_ms, [])
+    if not seleccion:
+        st.session_state[key_ms] = ["Todos"]
+        return
+    if "Todos" in seleccion:
+        if len(seleccion) > 1:
+            if seleccion[-1] == "Todos":
+                st.session_state[key_ms] = ["Todos"]
+            else:
+                st.session_state[key_ms] = [x for x in seleccion if x != "Todos"]
+
+
 def _marcar_todos_idcentro():
-    seleccion_actual = st.session_state.get("idcentro_ms", [])
-    if "Todos" in seleccion_actual and set(seleccion_actual) != set(opciones_idcentro):
-        st.session_state["idcentro_ms"] = list(opciones_idcentro)
+    _sincronizar_filtro_todos("idcentro_ms")
 
 
 with col_idcentro:
@@ -102,10 +113,10 @@ with col_idcentro:
         on_change=_marcar_todos_idcentro,
     )
 
-if "Todos" in seleccion_idcentro:
+if "Todos" in seleccion_idcentro or not seleccion_idcentro:
     idcentro_filtro = None
 else:
-    idcentro_filtro = tuple(seleccion_idcentro)  # tupla vacia = no mostrar ningun centro
+    idcentro_filtro = tuple(seleccion_idcentro)
 
 with col_semana:
     st.markdown("**Semana**")
@@ -138,12 +149,31 @@ with col_modo:
 modo = "actual" if modo_label == "Actual" else "simulado"
 
 # --- Filtros de nivelacion/venta interna ---
+prefijo_filtro = ("13",) if grupo == "MP" else (("14",) if grupo == "ME" else ("13", "14"))
+df_grupo_mats = df_consolidado[df_consolidado["IDMATERIAL"].str.startswith(prefijo_filtro)]
+mats_unicos = (
+    df_grupo_mats[["IDMATERIAL", "MATERIAL"]]
+    .dropna(subset=["IDMATERIAL"])
+    .drop_duplicates()
+    .sort_values("IDMATERIAL")
+)
+opciones_materiales = [
+    f"{row['IDMATERIAL']} - {row['MATERIAL']}"
+    for _, row in mats_unicos.iterrows()
+]
+
+if "busqueda_ms" in st.session_state:
+    st.session_state["busqueda_ms"] = [
+        m for m in st.session_state["busqueda_ms"]
+        if any(str(m).startswith(p) for p in prefijo_filtro)
+    ]
+
 col_busqueda, col_clasif, col_destino = st.columns(3)
 with col_busqueda:
     st.markdown("**🔍 Buscar Material**")
     materiales_busqueda = st.multiselect(
-        "busqueda", options=[], default=[], accept_new_options=True,
-        placeholder="ID o nombre, Enter para agregar",
+        "busqueda", options=opciones_materiales, default=[],
+        placeholder="Código o nombre para autocompletar...",
         label_visibility="collapsed", key="busqueda_ms",
     )
 with col_clasif:
@@ -155,9 +185,7 @@ with col_clasif:
 opciones_centro_destino = ["Todos"] + centros_grupo
 
 def _marcar_todos_centro_destino():
-    seleccion_actual = st.session_state.get("centro_destino_ms", [])
-    if "Todos" in seleccion_actual and set(seleccion_actual) != set(opciones_centro_destino):
-        st.session_state["centro_destino_ms"] = list(opciones_centro_destino)
+    _sincronizar_filtro_todos("centro_destino_ms")
 
 
 with col_destino:
@@ -172,10 +200,10 @@ with col_destino:
     )
 
 clasificacion_filtro = None if clasificacion_label == "Todas" else clasificacion_label
-if "Todos" in seleccion_centro_destino:
+if "Todos" in seleccion_centro_destino or not seleccion_centro_destino:
     centro_destino_filtro = None
 else:
-    centro_destino_filtro = tuple(seleccion_centro_destino)  # tupla vacia = ningun destino coincide
+    centro_destino_filtro = tuple(seleccion_centro_destino)
 
 filas_combinadas = construir_filas_combinadas(
     df_consolidado, grupo=grupo, semana=semana, modo=modo,
@@ -184,12 +212,16 @@ filas_combinadas = construir_filas_combinadas(
 )
 
 if materiales_busqueda:
-    terminos = [t.strip().lower() for t in materiales_busqueda if t.strip()]
+    terminos_id = {m.split(" - ")[0].strip() for m in materiales_busqueda if " - " in m}
+    terminos_texto = [m.lower().strip() for m in materiales_busqueda if " - " not in m]
     filas_combinadas = [
         f for f in filas_combinadas
-        if any(
-            termino in str(f.get("IdMaterial", "")).lower() or termino in str(f.get("Material", "")).lower()
-            for termino in terminos
+        if (
+            str(f.get("IdMaterial", "")) in terminos_id
+            or any(
+                t in str(f.get("IdMaterial", "")).lower() or t in str(f.get("Material", "")).lower()
+                for t in terminos_texto
+            )
         )
     ]
 

@@ -306,6 +306,27 @@ def construir_filas_combinadas(
     )
     filas_tras = construir_filas_traslados(df_largo, grupo=grupo, semana=semana, modo=modo)
 
+    # Si semana == 0 y modo == "simulado", ajustar Inventario con los movimientos sugeridos
+    # (muestra como quedaria el inventario al sumar pedidos que llegan esta semana y aplicar traslados recomendados)
+    if semana == 0 and modo == "simulado":
+        envios: dict[tuple[str, str], float] = {}
+        recepciones: dict[tuple[str, str], float] = {}
+        for t in filas_tras:
+            m = t["IdMaterial"]
+            envios[(m, t["Origen"])] = envios.get((m, t["Origen"]), 0.0) + t["Cantidad"]
+            recepciones[(m, t["Destino"])] = recepciones.get((m, t["Destino"]), 0.0) + t["Cantidad"]
+
+        filas_inv_ajustadas = []
+        for f in filas_inv:
+            m = f["IdMaterial"]
+            c = f["IdCentro"]
+            env = envios.get((m, c), 0.0)
+            rec = recepciones.get((m, c), 0.0)
+            entrega = f.get("EntregaPendiente", 0) or 0
+            inv_sim = (f["Inventario"] or 0) + entrega - env + rec
+            filas_inv_ajustadas.append({**f, "Inventario": inv_sim})
+        filas_inv = filas_inv_ajustadas
+
     nivelaciones: dict[tuple[str, str], list[dict]] = {}
     for t in filas_tras:
         nivelaciones.setdefault((t["IdMaterial"], t["Origen"]), []).append({
