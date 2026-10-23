@@ -5,7 +5,7 @@ mediante app/db/connector.py y app/config/settings.py, igual que el resto de
 tableros del servidor de BI.
 
 Fuentes:
-  - Inventario: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
+  - Inventario: DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_InventarioMaterialMM" (a la maxima fecha presente)
   - Necesidad MRP: DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_RequerimientoMaterialMRP"
   - Entregas pendientes de OC: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_ORDENCOMPRA
   - Maestra de materiales: DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_MAESTRAMATERIALES
@@ -28,56 +28,66 @@ QUERY_INVENTARIO_NECESIDAD = """
 -- Centros materia prima (material inicia por '13'): CPS1, CPS2, CPT2, CPB2, CPB1
 -- Centros empaque (material inicia por '14'): CPS9, CPT9, CPB9, CPE9, CPK9, CPO9
 -- Excluye los almacenes: 0003, 0004, 0005, 0006, 0017, 0018, 0038, 0039 (solo aplica a inventario normal, InventarioProduccion es el 85% de esos almacenes)
--- Semana 0 = semana actual (lunes a domingo), Semana 1 = siguiente semana, Semana 2 = la que sigue.
+-- FechaReferencia = Maxima fecha presente en EEO_InventarioMaterialMM (resiliente ante desfases o fallos del ETL diario).
+-- Semana 0 = semana de corte (lunes a domingo), Semana 1 = siguiente semana, Semana 2 = la que sigue.
 -- Entrega Pendiente: ordenes de compra no entregadas totalmente (IndicadorEntregaFinal = FALSE), sumando
 -- todos los almacenes, discriminadas por el centro real (IdCentroFase2) de TDS_VW_CDS_ORDENCOMPRA.
 -- Excluye ordenes cuya RazonSocial sea una de las razones sociales internas del grupo (no son compras
 -- a terceros).
--- Necesidad Semana 0 (actual) = CantidadReservado de TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL (no el MRP),
+-- Necesidad Semana 0 (actual) = CantidadReservado de EEO_InventarioMaterialMM a la fecha de corte,
 -- SIN filtro de almacen (a diferencia del inventario normal, que si excluye los almacenes de excepcion).
 -- Necesidad Semana 1 y 2 siguen viniendo del MRP (EEO_RequerimientoMaterialMRP).
 
-WITH INV_BASE AS (
+WITH FECHA_CORTE AS (
+    SELECT COALESCE(MAX(DATE("IMM_FechaInsercion")), CURRENT_DATE()) AS FechaReferencia
+    FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_InventarioMaterialMM"
+),
+INV_BASE AS (
     SELECT
-        "IdMaterial"                as IdMaterial,
-        "Material"                  as Material,
-        "IdCentroFase2"             as Centro,
-        "UnidadMedidaBase"          as Unidad,
-        "CantidadLibreUtilizacion"  as Libre,
-        "CantidadControlCalidad"   as Calidad,
-        "CantidadBloqueado"        as Bloqueado
-    FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
-    WHERE (
-            ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
-         OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
+        i."IMM_IdMaterial"                as IdMaterial,
+        i.IMM_ID_CENTRO_CF2              as Centro,
+        i."IMM_UnidadMedidaBase"          as Unidad,
+        i."IMM_CantidadLibreUtilizacion"  as Libre,
+        i."IMM_CantidadControlCalidad"   as Calidad,
+        i."IMM_CantidadBloqueado"        as Bloqueado
+    FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_InventarioMaterialMM" i
+    CROSS JOIN FECHA_CORTE fc
+    WHERE DATE(i."IMM_FechaInsercion") = fc.FechaReferencia
+      AND (
+            (i."IMM_IdMaterial" LIKE '13%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
+         OR (i."IMM_IdMaterial" LIKE '14%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
           )
-      AND ("IdAlmacen" IS NULL OR "IdAlmacen" NOT IN ('0003','0004','0005','0006','0017','0018','0038','0039'))
+      AND (i."IMM_IdAlmacen" IS NULL OR i."IMM_IdAlmacen" NOT IN ('0003','0004','0005','0006','0017','0018','0038','0039'))
 ),
 RESERVADO_BASE AS (
     -- CantidadReservado (Necesidad Semana 0) NO se filtra por almacen, a diferencia del inventario normal
     SELECT
-        "IdMaterial"           as IdMaterial,
-        "IdCentroFase2"        as Centro,
-        "CantidadReservado"    as Reservado
-    FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
-    WHERE (
-            ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
-         OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
+        i."IMM_IdMaterial"           as IdMaterial,
+        i.IMM_ID_CENTRO_CF2         as Centro,
+        i."IMM_CantidadReservado"    as Reservado
+    FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_InventarioMaterialMM" i
+    CROSS JOIN FECHA_CORTE fc
+    WHERE DATE(i."IMM_FechaInsercion") = fc.FechaReferencia
+      AND (
+            (i."IMM_IdMaterial" LIKE '13%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
+         OR (i."IMM_IdMaterial" LIKE '14%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
           )
 ),
 PROD_BASE AS (
     -- Inventario en los almacenes de excepcion (0003,0004,0005,0006,0017,0018,0038,0039)
     SELECT
-        "IdMaterial"                as IdMaterial,
-        "IdCentroFase2"             as Centro,
-        "CantidadLibreUtilizacion"  as Libre,
-        "CantidadControlCalidad"   as Calidad
-    FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_INVENTARIOMATERIALMMDIAACTUAL
-    WHERE (
-            ("IdMaterial" LIKE '13%' AND "IdCentroFase2" IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
-         OR ("IdMaterial" LIKE '14%' AND "IdCentroFase2" IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
+        i."IMM_IdMaterial"                as IdMaterial,
+        i.IMM_ID_CENTRO_CF2             as Centro,
+        i."IMM_CantidadLibreUtilizacion"  as Libre,
+        i."IMM_CantidadControlCalidad"   as Calidad
+    FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_InventarioMaterialMM" i
+    CROSS JOIN FECHA_CORTE fc
+    WHERE DATE(i."IMM_FechaInsercion") = fc.FechaReferencia
+      AND (
+            (i."IMM_IdMaterial" LIKE '13%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS1','CPS2','CPT2','CPB2','CPB1'))
+         OR (i."IMM_IdMaterial" LIKE '14%' AND i.IMM_ID_CENTRO_CF2 IN ('CPS9','CPT9','CPB9','CPE9','CPK9','CPO9'))
           )
-      AND "IdAlmacen" IN ('0003','0004','0005','0006','0017','0018','0038','0039')
+      AND i."IMM_IdAlmacen" IN ('0003','0004','0005','0006','0017','0018','0038','0039')
 ),
 MRP_BASE AS (
     SELECT
@@ -85,8 +95,9 @@ MRP_BASE AS (
         "MRP_ID_CENTRO_CF2"  as Centro,
         "MRP_UnidadMedidaBase" as Unidad,
         "MRP_CantidadNecesaria" as Cantidad,
-        DATEDIFF('WEEK', DATE_TRUNC('WEEK', CURRENT_DATE()), DATE_TRUNC('WEEK', "MRP_FechaNecesidad")) as Semana
+        DATEDIFF('WEEK', DATE_TRUNC('WEEK', fc.FechaReferencia), DATE_TRUNC('WEEK', "MRP_FechaNecesidad")) as Semana
     FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_RequerimientoMaterialMRP"
+    CROSS JOIN FECHA_CORTE fc
     WHERE "MRP_Estado" = 'Activo'
       AND "MRP_TipoMaterial" IN ('ZMPR','ZEMP')
       AND (
@@ -102,8 +113,9 @@ PO_BASE AS (
         "IdCentroFase2"        as Centro,
         ("CantidadOrdenCompra" - "CantidadEntregada") as Cantidad,
         "FechaEntregaPosicion" as FechaEntrega,
-        DATEDIFF('WEEK', DATE_TRUNC('WEEK', CURRENT_DATE()), DATE_TRUNC('WEEK', "FechaEntregaPosicion")) as Semana
+        DATEDIFF('WEEK', DATE_TRUNC('WEEK', fc.FechaReferencia), DATE_TRUNC('WEEK', "FechaEntregaPosicion")) as Semana
     FROM DB_TABLEAUDATASOURCE.CADENASUMINISTRO.TDS_VW_CDS_ORDENCOMPRA
+    CROSS JOIN FECHA_CORTE fc
     WHERE "IndicadorEntregaFinal" = FALSE
       AND "TipoMaterial" IN ('ZMPR','ZEMP')
       AND "RazonSocial" NOT IN (
@@ -164,7 +176,6 @@ MATERIAL_CENTRO AS (
 INV_AGG AS (
     SELECT
         IdMaterial, Centro,
-        MAX(Material)             as Material,
         SUM(Libre)                as InventarioLibreUtilizacion,
         SUM(Calidad)              as InventarioCalidad,
         SUM(Bloqueado)            as InventarioBloqueado
@@ -198,7 +209,7 @@ MRP_AGG AS (
 )
 SELECT
     MC.IdMaterial                                             as IdMaterial,
-    COALESCE(I.Material, MM."Material")                       as Material,
+    MM."Material"                                             as Material,
     MC.Centro                                                 as IdCentro,
     COALESCE(U.UnidadMedida, MM."UnidadMedidaBase")            as UnidadMedida,
     COALESCE(I.InventarioLibreUtilizacion, 0)                  as InventarioLibreUtilizacion,
@@ -213,8 +224,10 @@ SELECT
     PO.FechaEntregaProgramadaS2                                as "Fecha Entrega Programada S2",
     COALESCE(RES.CantidadReservado, 0)                         as NecesidadSemana0,
     COALESCE(R.NecesidadSemana1, 0)                            as NecesidadSemana1,
-    COALESCE(R.NecesidadSemana2, 0)                            as NecesidadSemana2
+    COALESCE(R.NecesidadSemana2, 0)                            as NecesidadSemana2,
+    FC.FechaReferencia                                         as FechaReferencia
 FROM MATERIAL_CENTRO MC
+CROSS JOIN FECHA_CORTE FC
 LEFT JOIN INV_AGG I  ON MC.IdMaterial = I.IdMaterial  AND MC.Centro = I.Centro
 LEFT JOIN RESERVADO_AGG RES ON MC.IdMaterial = RES.IdMaterial AND MC.Centro = RES.Centro
 LEFT JOIN PROD_AGG P ON MC.IdMaterial = P.IdMaterial  AND MC.Centro = P.Centro

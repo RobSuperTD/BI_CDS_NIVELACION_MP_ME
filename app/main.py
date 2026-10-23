@@ -27,9 +27,19 @@ from logic_inventario import (
 st.set_page_config(page_title="Nivelacion y Ventas Internas MP y ME", page_icon="📦", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
+with st.spinner("Cargando datos desde Snowflake..."):
+    df_consolidado = cargar_inventario_necesidad()
+
 # ---------- Header ----------
-fecha_actualizacion = ""  # Deja vacío si no necesitas la fecha
+fecha_actualizacion = ""
 semana_actual = None
+if not df_consolidado.empty and "FECHAREFERENCIA" in df_consolidado.columns:
+    val_fecha = df_consolidado["FECHAREFERENCIA"].dropna().iloc[0]
+    if hasattr(val_fecha, "strftime"):
+        fecha_actualizacion = val_fecha.strftime("%Y-%m-%d")
+        semana_actual = val_fecha.isocalendar()[1]
+    else:
+        fecha_actualizacion = str(val_fecha)
 
 _semana_txt = f" &nbsp;·&nbsp; Semana <b>{semana_actual}</b>" if semana_actual else ""
 sello_fecha = (
@@ -55,9 +65,6 @@ st.markdown(
     f"{sello_fecha}</div>",
     unsafe_allow_html=True,
 )
-
-with st.spinner("Cargando datos desde Snowflake..."):
-    df_consolidado = cargar_inventario_necesidad()
 
 # ================= Filtros =================
 
