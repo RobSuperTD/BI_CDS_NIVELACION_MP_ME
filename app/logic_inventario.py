@@ -334,7 +334,7 @@ def construir_filas_combinadas(
     nivelacion cuyo CentroNivelar este en esa tupla (None = todos).
     """
     if grupo == "AMBOS":
-        return [
+        filas_ambos = [
             *construir_filas_combinadas(
                 df_largo, "MP", semana, modo, idcentro_filtro, centro_destino_filtro, clasificacion_filtro,
             ),
@@ -342,6 +342,14 @@ def construir_filas_combinadas(
                 df_largo, "ME", semana, modo, idcentro_filtro, centro_destino_filtro, clasificacion_filtro,
             ),
         ]
+        mats_con_traslado = {f["IdMaterial"] for f in filas_ambos if f.get("CentroNivelar") is not None}
+        centros_todos = CENTROS_MP + CENTROS_ME
+        filas_ambos.sort(key=lambda f: (
+            0 if f["IdMaterial"] in mats_con_traslado else 1,
+            f["IdMaterial"],
+            centros_todos.index(f["IdCentro"]) if f["IdCentro"] in centros_todos else 99,
+        ))
+        return filas_ambos
 
     filas_inv = construir_filas_inventario_necesidad(
         df_largo, grupo=grupo, semana=semana, idcentro_filtro=idcentro_filtro, modo=modo,
@@ -383,6 +391,14 @@ def construir_filas_combinadas(
         }
 
     filas = [f for f in filas if f["IdMaterial"] in materiales_validos]
+
+    mats_con_traslado = {f["IdMaterial"] for f in filas if f.get("CentroNivelar") is not None}
+    centros_grupo = CENTROS_MP if grupo == "MP" else CENTROS_ME
+    filas.sort(key=lambda f: (
+        0 if f["IdMaterial"] in mats_con_traslado else 1,
+        f["IdMaterial"],
+        centros_grupo.index(f["IdCentro"]) if f["IdCentro"] in centros_grupo else 99,
+    ))
 
     return filas
 

@@ -101,6 +101,7 @@ with col_grupo:
     st.markdown("**Grupo**")
     grupo_label = st.radio(
         "grupo", list(GRUPOS.keys()),
+        index=list(GRUPOS.keys()).index("Ambos"),
         horizontal=True, label_visibility="collapsed", key="grupo",
     )
 grupo = GRUPOS[grupo_label]
@@ -211,9 +212,10 @@ filas_base = construir_filas_combinadas(
 )
 
 # Opciones de materiales UNICAMENTE de los materiales que aparecen en el dataframe
+mats_con_traslado_set = {f["IdMaterial"] for f in filas_base if f.get("CentroNivelar") is not None}
 mats_unicos = sorted(
     list({(f["IdMaterial"], f["Material"]) for f in filas_base}),
-    key=lambda x: x[0],
+    key=lambda x: (0 if x[0] in mats_con_traslado_set else 1, x[0]),
 )
 opciones_materiales = [f"{m[0]} - {m[1]}" for m in mats_unicos]
 
