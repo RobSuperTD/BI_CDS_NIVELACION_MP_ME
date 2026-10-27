@@ -374,8 +374,15 @@ def construir_filas_combinadas(
             for match in matches:
                 filas.append({**fila, **match})
 
-    materiales_con_traslado = {f["IdMaterial"] for f in filas if f.get("CentroNivelar") is not None}
-    filas = [f for f in filas if f["IdMaterial"] in materiales_con_traslado]
+    if hay_filtro_nivelacion:
+        materiales_validos = {f["IdMaterial"] for f in filas if f.get("CentroNivelar") is not None}
+    else:
+        materiales_validos = {
+            f["IdMaterial"] for f in filas
+            if f.get("CentroNivelar") is not None or (f.get("EntregaPendiente") or 0) > 0
+        }
+
+    filas = [f for f in filas if f["IdMaterial"] in materiales_validos]
 
     return filas
 
