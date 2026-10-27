@@ -66,31 +66,141 @@ GLOBAL_CSS = f"""
     /* ---------- Hero header ---------- */
     .hero {{
       background: linear-gradient(110deg, #0033a0 0%, #0093d9 100%);
-      border-radius: 18px; padding: 22px 28px; margin: 0 0 14px;
-      box-shadow: 0 10px 26px rgba(0,51,160,0.28); text-align: center; position: relative;
+      border-radius: 18px; padding: 18px 24px; margin: 0 0 14px;
+      box-shadow: 0 10px 26px rgba(0,51,160,0.28); position: relative;
       overflow: hidden;
+      container-type: inline-size;
+      container-name: herosection;
     }}
     .hero::after {{
       content:""; position:absolute; right:-40px; top:-40px; width:160px; height:160px;
       background: radial-gradient(circle, rgba(255,219,0,0.35) 0%, rgba(255,219,0,0) 70%);
+      pointer-events: none;
+    }}
+    .hero-container {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: relative;
+      z-index: 1;
+      width: 100%;
+    }}
+    .hero-logo-box, .hero-logo-spacer {{
+      flex: 0 0 150px;
+      width: 150px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+    }}
+    .hero-logo-spacer {{
+      visibility: hidden;
+    }}
+    .hero-logo-img {{
+      height: 65px;
+      max-width: 150px;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0px 0px 8px rgba(255,219,0,0.6)) drop-shadow(0px 4px 12px rgba(0,51,160,0.7));
+      transition: height 0.2s ease, max-width 0.2s ease;
+    }}
+    .hero-text-box {{
+      flex: 1 1 auto;
+      text-align: center;
+      min-width: 0;
     }}
     .hero h1 {{
-      color:#fff; font-size:1.9rem; font-weight:800; margin:0; letter-spacing:.3px;
-      text-shadow:0 2px 10px rgba(0,0,0,.18);
+      color:#fff;
+      font-size: clamp(1.2rem, 2.2vw, 1.85rem);
+      font-weight: 800;
+      margin: 0;
+      letter-spacing: .3px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.18);
+      line-height: 1.25;
+      word-wrap: break-word;
     }}
-    .hero .bar {{ height:4px; width:120px; margin:10px auto 0;
-      background: linear-gradient(90deg,#ffdb00,#f5a404,#ea6608); border-radius:4px; }}
+    .hero .bar {{
+      height: 4px;
+      width: 110px;
+      margin: 8px auto 0;
+      background: linear-gradient(90deg,#ffdb00,#f5a404,#ea6608);
+      border-radius: 4px;
+    }}
     .hero .updated {{
-      position:relative; display:inline-flex; align-items:center; gap:7px;
-      margin:12px auto 0; padding:5px 16px; border-radius:999px;
-      background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.28);
-      color:#eef6ff; font-size:0.86rem; font-weight:600; backdrop-filter:blur(2px);
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 10px auto 0;
+      padding: 4px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.14);
+      border: 1px solid rgba(255,255,255,0.28);
+      color: #eef6ff;
+      font-size: 0.84rem;
+      font-weight: 600;
+      backdrop-filter: blur(2px);
     }}
     .hero .updated::before {{
       content:""; width:8px; height:8px; border-radius:50%; background:#76b62a;
       box-shadow:0 0 0 3px rgba(118,182,42,0.35);
     }}
     .hero .updated b {{ color:#fff; font-weight:800; }}
+
+    /* Responsive: viewport query (iframe / window) */
+    @media (max-width: 992px) {{
+      .hero {{ padding: 16px 18px; }}
+      .hero-container {{
+        flex-direction: column;
+        justify-content: center;
+        gap: 10px;
+      }}
+      .hero-logo-box {{
+        flex: 0 0 auto;
+        width: 100%;
+        justify-content: center;
+      }}
+      .hero-logo-spacer {{
+        display: none;
+      }}
+      .hero-logo-img {{
+        height: 52px;
+      }}
+      .hero h1 {{
+        font-size: clamp(1.15rem, 4vw, 1.45rem);
+      }}
+    }}
+
+    @media (max-width: 576px) {{
+      .hero {{ padding: 12px 14px; }}
+      .hero-logo-img {{ height: 42px; }}
+      .hero h1 {{ font-size: 1.15rem; }}
+      .hero .bar {{ width: 80px; height: 3px; margin: 6px auto 0; }}
+      .hero .updated {{ font-size: 0.75rem; padding: 3px 10px; }}
+    }}
+
+    /* Responsive: container query (en caso de incrustacion flexible) */
+    @container herosection (max-width: 950px) {{
+      .hero-container {{
+        flex-direction: column;
+        justify-content: center;
+        gap: 10px;
+      }}
+      .hero-logo-box {{
+        flex: 0 0 auto;
+        width: 100%;
+        justify-content: center;
+      }}
+      .hero-logo-spacer {{
+        display: none;
+      }}
+      .hero-logo-img {{
+        height: 52px;
+      }}
+      .hero h1 {{
+        font-size: 1.35rem;
+      }}
+    }}
     /* Ocultar el menú superior nativo de Streamlit */
     header[data-testid="stHeader"] {{
       display: none !important;

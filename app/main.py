@@ -56,13 +56,28 @@ if logo_path.exists():
     with open(logo_path, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode()
 
+logo_html = (
+    f"<div class='hero-logo-box'><img src='data:image/png;base64,{logo_b64}' class='hero-logo-img' alt='Super'></div>"
+    if logo_b64 else ""
+)
+spacer_html = (
+    "<div class='hero-logo-spacer' aria-hidden='true'></div>"
+    if logo_b64 else ""
+)
+
 # Renderizar el encabezado completo (Hero)
 st.markdown(
     "<div class='hero'>"
-    f"<img src='data:image/png;base64,{logo_b64}' style='position: absolute; left: 4%; top: 50%; transform: translateY(-50%); height: 75px; filter: drop-shadow(0px 0px 8px rgba(255,219,0,0.6)) drop-shadow(0px 4px 12px rgba(0,51,160,0.7));'>"
+    "<div class='hero-container'>"
+    f"{logo_html}"
+    "<div class='hero-text-box'>"
     "<h1>NIVELACIÓN Y VENTAS INTERNAS MP Y ME</h1>"
     "<div class='bar'></div>"
-    f"{sello_fecha}</div>",
+    f"{sello_fecha}"
+    "</div>"
+    f"{spacer_html}"
+    "</div>"
+    "</div>",
     unsafe_allow_html=True,
 )
 
