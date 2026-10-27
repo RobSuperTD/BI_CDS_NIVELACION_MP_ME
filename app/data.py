@@ -95,7 +95,8 @@ MRP_BASE AS (
         "MRP_ID_CENTRO_CF2"  as Centro,
         "MRP_UnidadMedidaBase" as Unidad,
         "MRP_CantidadNecesaria" as Cantidad,
-        DATEDIFF('WEEK', DATE_TRUNC('WEEK', fc.FechaReferencia), DATE_TRUNC('WEEK', "MRP_FechaNecesidad")) as Semana
+        -- Corrimiento de -2 semanas: regla de planeacion donde MRP se graba con horizonte desplazado (+2 sem)
+        DATEDIFF('WEEK', DATE_TRUNC('WEEK', fc.FechaReferencia), DATE_TRUNC('WEEK', DATEADD('week', -2, "MRP_FechaNecesidad"))) as Semana
     FROM DB_EXCELENCIAYEFECTIVIDADORGANIZACIONAL.PUBLIC."EEO_RequerimientoMaterialMRP"
     CROSS JOIN FECHA_CORTE fc
     WHERE "MRP_Estado" = 'Activo'
@@ -118,6 +119,7 @@ PO_BASE AS (
     CROSS JOIN FECHA_CORTE fc
     WHERE "IndicadorEntregaFinal" = FALSE
       AND "TipoMaterial" IN ('ZMPR','ZEMP')
+      AND ("CantidadOrdenCompra" - "CantidadEntregada") > 0
       AND "RazonSocial" NOT IN (
             'C.I. SUPER S.A.S.',
             'SUPER DE ALIMENTOS S.A.S',
@@ -131,16 +133,18 @@ PO_BASE AS (
           )
 ),
 PO_AGG AS (
+    -- Para la semana actual (S0), se acumulan tanto las ordenes programadas para esta semana
+    -- como las entregas atrasadas (backlog con Semana <= 0) pendientes por ingresar a planta
     SELECT
         IdMaterial, Centro,
-        SUM(CASE WHEN Semana = 0 THEN Cantidad ELSE 0 END) as EntregaPendienteS0,
-        MIN(CASE WHEN Semana = 0 THEN FechaEntrega END)    as FechaEntregaProgramadaS0,
+        SUM(CASE WHEN Semana <= 0 THEN Cantidad ELSE 0 END) as EntregaPendienteS0,
+        MIN(CASE WHEN Semana <= 0 THEN FechaEntrega END)    as FechaEntregaProgramadaS0,
         SUM(CASE WHEN Semana = 1 THEN Cantidad ELSE 0 END) as EntregaPendienteS1,
         MIN(CASE WHEN Semana = 1 THEN FechaEntrega END)    as FechaEntregaProgramadaS1,
         SUM(CASE WHEN Semana = 2 THEN Cantidad ELSE 0 END) as EntregaPendienteS2,
         MIN(CASE WHEN Semana = 2 THEN FechaEntrega END)    as FechaEntregaProgramadaS2
     FROM PO_BASE
-    WHERE Semana IN (0, 1, 2)
+    WHERE Semana <= 2
     GROUP BY IdMaterial, Centro
 ),
 UNIDAD_BASE AS (

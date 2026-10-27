@@ -76,7 +76,8 @@ def calcular_traslados_semana(estado: dict[str, dict], centros_ordenados: list[s
 def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
     """
     Devuelve, por material, el estado (inv_total, inv_libre_calidad,
-    necesidad) de cada IdCentro fisico en las semanas 0, 1 y 2.
+    necesidad) de cada IdCentro fisico en las semanas 0, 1 y 2, junto con los
+    traslados sugeridos calculados para cada semana.
 
     df_largo viene en formato largo (una fila por Material+Centro, ver
     QUERY_INVENTARIO_NECESIDAD en data.py): IDMATERIAL, MATERIAL, IDCENTRO,
@@ -92,19 +93,25 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
     en inv_total/inv_libre_calidad ni en la cascada o los traslados.
 
     modo="actual": cascada pura, inv(N+1) = inv(N) - necesidad(N). No suma
-    entregas pendientes ni aplica traslados.
-    modo="simulado": se asume que las entregas pendientes de OC llegan, asi
-    que inv(N+1) = inv(N) - necesidad(N) + entrega pendiente(N) (la semana
-    0 en si no suma nada, no hay semana -1). Ademas, al final de cada
-    semana aplica los traslados que sugeriria calcular_traslados_semana
-    para esa semana (resta al origen, suma al destino, tanto en inv_total
-    como en inv_libre_calidad) antes de pasar a la semana siguiente.
+    entregas pendientes ni aplica traslados entre plantas.
+    modo="simulado": simulacion operativa completa semana a semana:
+    - En cada semana S (0, 1, 2), las entregas pendientes de ordenes de compra
+      programadas para esa semana se suman a la disponibilidad operativa.
+    - Se calculan los traslados optimos de nivelacion y venta interna con base
+      en esta disponibilidad real simulada (evitando traslados innecesarios a
+      centros que ya tienen compras en camino, y permitiendo que centros con
+      superavit por compras apoyen a plantas en deficit).
+    - El inventario visible de la semana S refleja la disponibilidad con los
+      movimientos sugeridos aplicados (inv_disponible - envios + recepciones).
+    - Para la semana siguiente S+1, se descuenta el consumo planificado
+      (necesidad) y el remanente se proyecta como saldo inicial.
 
     Estructura del resultado:
         {IdMaterial: {"Material":, "UnidadMedida":,
                       "estado": {IdCentro: {0: {...}, 1: {...}, 2: {...}}},
                       "bloqueado": {IdCentro: cantidad},
-                      "entrega_pendiente": {IdCentro: {0: {"cantidad":, "fecha":}, 1: {...}, 2: {...}}}}}
+                      "entrega_pendiente": {IdCentro: {0: {"cantidad":, "fecha":}, 1: {...}, 2: {...}}},
+                      "traslados": {0: [...], 1: [...], 2: [...]}}}
     """
     centros = CENTROS_MP if grupo == "MP" else CENTROS_ME
     prefijo = "13" if grupo == "MP" else "14"
@@ -116,6 +123,7 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
         estado_centro: dict[str, dict[int, dict]] = {c: {} for c in centros}
         bloqueado_centro: dict[str, float] = {}
         entrega_centro: dict[str, dict[int, dict]] = {c: {} for c in centros}
+        traslados_por_semana: dict[int, list[dict]] = {0: [], 1: [], 2: []}
 
         for centro in centros:
             fila = filas_centro.get(centro)
@@ -125,6 +133,13 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
             bloqueado_centro[centro] = (fila.get("CANTIDADBLOQUEADO", 0) or 0) if fila is not None else 0
             inv_libre_calidad = libre + calidad
 
+            for s in (0, 1, 2):
+                entrega_centro[centro][s] = {
+                    "cantidad": (fila.get(f"Entrega Pendiente S{s}", 0) or 0) if fila is not None else 0,
+                    "fecha": (fila.get(f"Fecha Entrega Programada S{s}")) if fila is not None else None,
+                }
+
+            # Estado inicial semana 0 en bodega fisica
             estado_centro[centro][0] = {
                 "inv_total": inv_libre_calidad + produccion,
                 "inv_libre_calidad": inv_libre_calidad,
@@ -133,32 +148,59 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
             estado_centro[centro][1] = {"necesidad": (fila.get("NECESIDADSEMANA1", 0) or 0) if fila is not None else 0}
             estado_centro[centro][2] = {"necesidad": (fila.get("NECESIDADSEMANA2", 0) or 0) if fila is not None else 0}
 
-            for s in (0, 1, 2):
-                entrega_centro[centro][s] = {
-                    "cantidad": (fila.get(f"Entrega Pendiente S{s}", 0) or 0) if fila is not None else 0,
-                    "fecha": (fila.get(f"Fecha Entrega Programada S{s}")) if fila is not None else None,
-                }
-
-        for semana in (0, 1):
-            for centro in centros:
-                actual = estado_centro[centro][semana]
-                entrega_semana_anterior = entrega_centro[centro][semana]["cantidad"] if modo == "simulado" else 0
-                estado_centro[centro][semana + 1]["inv_total"] = (
-                    actual["inv_total"] - actual["necesidad"] + entrega_semana_anterior
-                )
-                estado_centro[centro][semana + 1]["inv_libre_calidad"] = (
-                    actual["inv_libre_calidad"] - actual["necesidad"] + entrega_semana_anterior
-                )
-
+        # Simulacion semana a semana (0, 1, 2)
+        for s in (0, 1, 2):
             if modo == "simulado":
-                estado_semana = {c: estado_centro[c][semana] for c in centros}
-                traslados = calcular_traslados_semana(estado_semana, centros)
-                for t in traslados:
-                    origen, destino, cantidad = t["Origen"], t["Destino"], t["Cantidad"]
-                    estado_centro[origen][semana + 1]["inv_total"] -= cantidad
-                    estado_centro[origen][semana + 1]["inv_libre_calidad"] -= cantidad
-                    estado_centro[destino][semana + 1]["inv_total"] += cantidad
-                    estado_centro[destino][semana + 1]["inv_libre_calidad"] += cantidad
+                # En modo simulado, se suman las entregas pendientes de la semana s a la disponibilidad operativa
+                estado_disponible_s = {}
+                for c in centros:
+                    oc = entrega_centro[c][s]["cantidad"]
+                    estado_disponible_s[c] = {
+                        "inv_total": estado_centro[c][s]["inv_total"] + oc,
+                        "inv_libre_calidad": estado_centro[c][s]["inv_libre_calidad"] + oc,
+                        "necesidad": estado_centro[c][s]["necesidad"],
+                    }
+
+                # Se calculan los traslados optimos de la semana s con disponibilidad real
+                tras = calcular_traslados_semana(estado_disponible_s, centros)
+                traslados_por_semana[s] = tras
+
+                envios: dict[str, float] = {}
+                recepciones: dict[str, float] = {}
+                for t in tras:
+                    envios[t["Origen"]] = envios.get(t["Origen"], 0.0) + t["Cantidad"]
+                    recepciones[t["Destino"]] = recepciones.get(t["Destino"], 0.0) + t["Cantidad"]
+
+                # El inventario visible en semana s refleja el inventario simulado con movimientos aplicados
+                for c in centros:
+                    env = envios.get(c, 0.0)
+                    rec = recepciones.get(c, 0.0)
+                    estado_centro[c][s]["inv_total"] = estado_disponible_s[c]["inv_total"] - env + rec
+
+                # Proyectar al inicio de la semana s+1 si s < 2
+                if s < 2:
+                    for c in centros:
+                        act = estado_disponible_s[c]
+                        env = envios.get(c, 0.0)
+                        rec = recepciones.get(c, 0.0)
+                        cierre_total = act["inv_total"] - act["necesidad"] - env + rec
+                        rem_prod = max(0.0, (act["inv_total"] - act["inv_libre_calidad"]) - act["necesidad"])
+                        cierre_lc = cierre_total - rem_prod
+                        estado_centro[c][s + 1]["inv_total"] = cierre_total
+                        estado_centro[c][s + 1]["inv_libre_calidad"] = cierre_lc
+            else:
+                # Modo actual: cascada pura sin OC ni traslados entre plantas
+                estado_act_s = {c: estado_centro[c][s] for c in centros}
+                traslados_por_semana[s] = calcular_traslados_semana(estado_act_s, centros)
+
+                if s < 2:
+                    for c in centros:
+                        act = estado_centro[c][s]
+                        cierre_total = act["inv_total"] - act["necesidad"]
+                        rem_prod = max(0.0, (act["inv_total"] - act["inv_libre_calidad"]) - act["necesidad"])
+                        cierre_lc = cierre_total - rem_prod
+                        estado_centro[c][s + 1]["inv_total"] = cierre_total
+                        estado_centro[c][s + 1]["inv_libre_calidad"] = cierre_lc
 
         primera = filas_material.iloc[0]
         resultado[id_mat] = {
@@ -167,6 +209,7 @@ def simular_semanas(df_largo: pd.DataFrame, grupo: str, modo: str) -> dict:
             "estado": estado_centro,
             "bloqueado": bloqueado_centro,
             "entrega_pendiente": entrega_centro,
+            "traslados": traslados_por_semana,
         }
 
     return resultado
@@ -201,11 +244,10 @@ def construir_filas_inventario_necesidad(
             datos_semana = estado_centro[centro][semana]
             inv = datos_semana["inv_total"]
             nec = datos_semana["necesidad"]
-
-            if inv == 0 and nec == 0:
-                continue
-
             entrega = entrega_centro[centro][semana]
+
+            if inv == 0 and nec == 0 and (entrega["cantidad"] or 0) == 0:
+                continue
 
             filas.append({
                 "IdMaterial": id_mat,
@@ -237,8 +279,8 @@ def construir_filas_traslados(
 
     filas = []
     for id_mat, info in estados.items():
-        estado_semana = {c: info["estado"][c][semana] for c in centros}
-        for t in calcular_traslados_semana(estado_semana, centros):
+        traslados_semana = info.get("traslados", {}).get(semana, [])
+        for t in traslados_semana:
             origen, destino, cantidad = t["Origen"], t["Destino"], t["Cantidad"]
             clasificacion = clasificar_traslado(origen, destino)
 
@@ -305,27 +347,6 @@ def construir_filas_combinadas(
         df_largo, grupo=grupo, semana=semana, idcentro_filtro=idcentro_filtro, modo=modo,
     )
     filas_tras = construir_filas_traslados(df_largo, grupo=grupo, semana=semana, modo=modo)
-
-    # Si semana == 0 y modo == "simulado", ajustar Inventario con los movimientos sugeridos
-    # (muestra como quedaria el inventario al sumar pedidos que llegan esta semana y aplicar traslados recomendados)
-    if semana == 0 and modo == "simulado":
-        envios: dict[tuple[str, str], float] = {}
-        recepciones: dict[tuple[str, str], float] = {}
-        for t in filas_tras:
-            m = t["IdMaterial"]
-            envios[(m, t["Origen"])] = envios.get((m, t["Origen"]), 0.0) + t["Cantidad"]
-            recepciones[(m, t["Destino"])] = recepciones.get((m, t["Destino"]), 0.0) + t["Cantidad"]
-
-        filas_inv_ajustadas = []
-        for f in filas_inv:
-            m = f["IdMaterial"]
-            c = f["IdCentro"]
-            env = envios.get((m, c), 0.0)
-            rec = recepciones.get((m, c), 0.0)
-            entrega = f.get("EntregaPendiente", 0) or 0
-            inv_sim = (f["Inventario"] or 0) + entrega - env + rec
-            filas_inv_ajustadas.append({**f, "Inventario": inv_sim})
-        filas_inv = filas_inv_ajustadas
 
     nivelaciones: dict[tuple[str, str], list[dict]] = {}
     for t in filas_tras:
