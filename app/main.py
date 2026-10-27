@@ -249,14 +249,12 @@ else:
 
 total_nivelacion = sum(1 for f in filas_combinadas if f.get("ClasificacionNivelar") == "Nivelacion")
 total_venta_interna = sum(1 for f in filas_combinadas if f.get("ClasificacionNivelar") == "Venta Interna")
-total_con_entrega = len({f["IdMaterial"] for f in filas_combinadas if (f.get("EntregaPendiente") or 0) > 0})
 
 st.markdown(
     render_count_badges([
         ("TOTAL TRASLADOS", str(total_nivelacion + total_venta_interna), "#013066"),
         ("NIVELACION", str(total_nivelacion), CLASIFICACION_COLORES["Nivelacion"]),
         ("VENTA INTERNA", str(total_venta_interna), CLASIFICACION_COLORES["Venta Interna"]),
-        ("CON ENTREGA PENDIENTE", str(total_con_entrega), "#2E7D32"),
     ]),
     unsafe_allow_html=True,
 )
